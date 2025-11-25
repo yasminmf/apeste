@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Médico da Peste Negra RPG</title>
-
+  <script src="/_sdk/data_sdk.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
   <style>
     body {
       box-sizing: border-box;
@@ -40,9 +41,30 @@
     .subtitle {
       font-size: 16px;
       text-align: center;
-      margin-bottom: 20px;
+      margin-bottom: 10px;
       color: #d4c5b0;
       font-style: italic;
+    }
+
+    /* Botão do Códex */
+    .codex-button {
+      background: rgba(139, 111, 71, 0.4);
+      border: 2px solid #8b6f47;
+      border-radius: 8px;
+      padding: 8px 14px;
+      color: #f5e6d3;
+      font-family: 'Georgia', serif;
+      cursor: pointer;
+      margin: 0 0 15px auto;
+      display: block;
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+
+    .codex-button:hover {
+      background: rgba(139, 111, 71, 0.7);
+      box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+      transform: translateY(-1px);
     }
 
     .stats-bar {
@@ -276,7 +298,7 @@
       color: #d4c5b0;
     }
 
-    /* Modal de descrição de item */
+    /* Modal genérico (itens e códex) */
     .modal {
       position: fixed;
       inset: 0;
@@ -295,8 +317,8 @@
       background: rgba(60, 40, 30, 0.97);
       border: 2px solid #8b6f47;
       border-radius: 10px;
-      max-width: 420px;
-      width: 90%;
+      max-width: 700px;
+      width: 95%;
       max-height: 80vh;
       padding: 20px;
       position: relative;
@@ -352,6 +374,62 @@
       cursor: not-allowed;
     }
 
+    /* Layout específico do Códex */
+    .codex-layout {
+      display: flex;
+      gap: 12px;
+      margin-top: 10px;
+      max-height: 60vh;
+    }
+
+    .codex-list {
+      flex: 1;
+      border-right: 1px solid #8b6f47;
+      padding-right: 8px;
+      overflow-y: auto;
+    }
+
+    .codex-entry-view {
+      flex: 2;
+      padding-left: 8px;
+      overflow-y: auto;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .codex-list-item {
+      width: 100%;
+      text-align: left;
+      background: rgba(139, 111, 71, 0.2);
+      border: 1px solid #8b6f47;
+      border-radius: 6px;
+      padding: 6px 8px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s ease, transform 0.1s ease;
+    }
+
+    .codex-list-item:hover {
+      background: rgba(139, 111, 71, 0.5);
+      transform: translateX(2px);
+    }
+
+    .codex-list-item.active {
+      background: rgba(139, 111, 71, 0.8);
+      border-color: #f5e6d3;
+    }
+
+    .codex-list-title {
+      font-weight: bold;
+      display: block;
+    }
+
+    .codex-list-category {
+      font-size: 12px;
+      color: #d4c5b0;
+    }
+
     /* Caixa de status do tratamento com scroll */
     .treatment-status-box {
       max-height: 260px;
@@ -372,6 +450,21 @@
       .scene-text {
         font-size: 15px;
       }
+
+      .codex-layout {
+        flex-direction: column;
+      }
+
+      .codex-list {
+        border-right: none;
+        border-bottom: 1px solid #8b6f47;
+        padding-right: 0;
+        padding-bottom: 8px;
+      }
+
+      .codex-entry-view {
+        padding-left: 0;
+      }
     }
   </style>
   <style>@view-transition { navigation: auto; }</style>
@@ -380,6 +473,10 @@
   <div class="game-container">
    <h1 class="title" id="gameTitle">Médico da Peste Negra</h1>
    <p class="subtitle">Um RPG de Sobrevivência Medieval</p>
+
+   <!-- Botão para abrir o Códex / Diário -->
+   <button id="codexButton" class="codex-button hidden" onclick="openCodex()">📖 Códex / Diário</button>
+
    <div id="statsBar" class="stats-bar hidden">
     <div class="stat-item">
      <div class="stat-label">Dia</div>
@@ -428,6 +525,21 @@
     </div>
    </div>
 
+   <!-- Modal do Códex / Diário -->
+   <div id="codexModal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-close" onclick="closeCodex()">✖</button>
+      <h3 class="modal-title">📖 Códex / Diário do Médico</h3>
+      <div class="codex-layout">
+        <div id="codexList" class="codex-list"></div>
+        <div id="codexEntryView" class="codex-entry-view">
+          Nenhum registro desbloqueado ainda.<br>
+          Atenda pacientes, viaje, colete relíquias e leia falas estranhas para preencher este caderno.
+        </div>
+      </div>
+    </div>
+   </div>
+
    <div id="mainContent">
     <div class="loading">
      Carregando o jogo...
@@ -468,6 +580,9 @@
     let currentScene = 'intro';
     let isLoading = false;
     let currentIncenseUsed = false; // incenso ativado para o paciente atual
+
+    // Códex
+    let codexSelectedId = null;
 
     const regions = {
       veneza:  { name: 'Veneza',  danger: 3, pay: 15 },
@@ -667,19 +782,246 @@
       ]
     };
 
+    // Diálogos extras após a Vigília do Quarto Dia
+    const DIALOGUES_AFTER = {
+      mercador: [
+        { id: "merc_a01", text: "“Mas doutor… você cheira a treva e incenso. Ela já caminhou ao seu lado, não já?”" },
+        { id: "merc_a02", text: "“Desde aquela noite, seus olhos mudaram. Quem olha a Morte de frente nunca mais volta o mesmo para o mercado.”" },
+        { id: "merc_a03", text: "“Alguns dizem que a Morte não recolhe, apenas conta. Quem será que está anotando os resultados, hein?”" }
+      ],
+      paciente: [
+        { id: "pac_a01", text: "“O senhor tem visto os jogadores, doutor? Disseram que tudo isso é aposta…”" },
+        { id: "pac_a02", text: "“Quando a febre subiu, eu vi uma figura ao seu lado. Não era padre, nem freira. Quem era ela?”" },
+        { id: "pac_a03", text: "“Dizem que alguns médicos foram escolhidos para testemunhar o fim… o senhor é um deles, não é?”" }
+      ],
+      viagem: [
+        { id: "via_a01", text: "Na neblina da estrada, você jura ver a silhueta da Morte entre carroças e mendigos — observando, não colhendo." }
+      ],
+      cutscene: [
+        { id: "cut_a01", text: "Você se vê em um quarto escuro. Quatro velas ardem até o pavio, enquanto uma figura encapuzada sussurra: “A vida não foi conquistada. Foi concedida.”" }
+      ]
+    };
+    
+    function iniciarMusica() {
+      const bgm = document.getElementById("bgm");
+      bgm.volume = 0.4; // volume 40%
+      bgm.play().catch(err => {
+        console.log("Autoplay bloqueado pelo navegador, precisa de interação do usuário");
+      });
+    }
+
+    // =========================
+    //   FUNÇÕES DO CÓDEX
+    // =========================
+
+    function ensureCodex() {
+      if (!gameState) return;
+      if (!gameState.codex || typeof gameState.codex !== 'object') {
+        gameState.codex = {};
+      }
+    }
+
+    function getCodexCategoryForItem(itemId) {
+      if (itemId.startsWith('relic_') || itemId.startsWith('doc_') || itemId.startsWith('travel_')) {
+        return "Organização & Conspirações";
+      }
+      return "Equipamentos & Recursos";
+    }
+
+    function unlockCodexFromItem(itemId) {
+      if (!gameState) return;
+      ensureCodex();
+      const def = ITEM_DEFS[itemId] || BASE_ITEMS[itemId];
+      if (!def) return;
+      const key = "item_" + itemId;
+      if (gameState.codex[key]) return;
+
+      const category = getCodexCategoryForItem(itemId);
+      const textParts = [];
+      if (def.shortDesc) textParts.push(def.shortDesc);
+      if (def.effectHint) textParts.push("<em>" + def.effectHint + "</em>");
+      if (def.hook) textParts.push("<small>" + def.hook + "</small>");
+      if (def.desc) textParts.push(def.desc);
+
+      gameState.codex[key] = {
+        id: key,
+        type: "item",
+        category,
+        title: def.name || ("Item: " + itemId),
+        text: textParts.join("<br><br>"),
+        discoveredAt: new Date().toISOString()
+      };
+    }
+
+    function getCodexCategoryForDialogue(cat) {
+      switch (cat) {
+        case "mercador": return "Falas do Mercado & Negócios";
+        case "paciente": return "Confissões de Pacientes";
+        case "viagem":   return "Encontros na Estrada";
+        case "cutscene": return "Sonhos & Visões";
+        default: return "Falas & Rumores";
+      }
+    }
+
+    function unlockCodexFromDialogue(category, dialogueObj) {
+      if (!gameState || !dialogueObj) return;
+      ensureCodex();
+      const key = "dialogue_" + dialogueObj.id;
+      if (gameState.codex[key]) return;
+
+      const catLabel = getCodexCategoryForDialogue(category);
+      gameState.codex[key] = {
+        id: key,
+        type: "dialogue",
+        category: catLabel,
+        title: "Fala (" + dialogueObj.id.toUpperCase() + ")",
+        text: dialogueObj.text,
+        discoveredAt: new Date().toISOString()
+      };
+    }
+
+    function addDiaryEntry(idSuffix, title, text) {
+      if (!gameState) return;
+      ensureCodex();
+      const key = "diary_" + idSuffix;
+      if (gameState.codex[key]) return;
+      gameState.codex[key] = {
+        id: key,
+        type: "diary",
+        category: "Diário do Médico",
+        title,
+        text,
+        discoveredAt: new Date().toISOString()
+      };
+    }
+
+    // Entrada especial de Testemunho
+    function unlockVigiliaTestimonyEntry() {
+      if (!gameState) return;
+      ensureCodex();
+      const key = "testemunho_vigilia_quarto_dia";
+      if (gameState.codex[key]) return;
+
+      const text = `
+        Naquela noite, entre febre e cansaço, a Morte sentou-se à beira da sua cama. 
+        As velas tremiam, mas não por causa do vento. Ela não o atacou. Apenas falou:
+
+        <br><br>
+        “Não comemore, doutor. A vida não foi conquistada. 
+        Ela foi… concedida.”
+
+        <br><br>
+        E então:
+
+        <br><br>
+        “Pergunte-se: quem lucra quando todos adoecem?”
+
+        <br><br>
+        Desde então, a peste parece menos uma calamidade e mais um jogo com regras ocultas.
+      `;
+
+      gameState.codex[key] = {
+        id: key,
+        type: "testemunho",
+        category: "Testemunho",
+        title: "A Vigília do Quarto Dia",
+        text,
+        discoveredAt: new Date().toISOString()
+      };
+    }
+
+    function openCodex() {
+      if (!gameState) return;
+      ensureCodex();
+      const modal = document.getElementById('codexModal');
+      if (!modal) return;
+
+      if (!codexSelectedId) {
+        const entries = Object.values(gameState.codex || {});
+        if (entries.length > 0) {
+          entries.sort((a, b) => new Date(a.discoveredAt || 0) - new Date(b.discoveredAt || 0));
+          codexSelectedId = entries[0].id;
+        }
+      }
+
+      renderCodexModal();
+      modal.classList.remove('hidden');
+    }
+
+    function closeCodex() {
+      const modal = document.getElementById('codexModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function renderCodexModal() {
+      const listEl = document.getElementById('codexList');
+      const viewEl = document.getElementById('codexEntryView');
+      if (!listEl || !viewEl || !gameState) return;
+      ensureCodex();
+
+      const entries = Object.values(gameState.codex || {}).sort(
+        (a, b) => new Date(a.discoveredAt || 0) - new Date(b.discoveredAt || 0)
+      );
+
+      if (entries.length === 0) {
+        listEl.innerHTML = `<p style="font-size:14px; color:#d4c5b0;">Nenhum registro ainda.</p>`;
+        viewEl.innerHTML = `Nenhum registro desbloqueado ainda.<br>Atenda pacientes, viaje, colete relíquias e leia falas estranhas para preencher este caderno.`;
+        return;
+      }
+
+      let listHTML = "";
+      entries.forEach(entry => {
+        listHTML += `
+          <button class="codex-list-item ${entry.id === codexSelectedId ? 'active' : ''}"
+                  onclick="selectCodexEntry('${entry.id}')">
+            <span class="codex-list-title">${entry.title}</span>
+            <span class="codex-list-category">${entry.category}</span>
+          </button>
+        `;
+      });
+      listEl.innerHTML = listHTML;
+
+      const current = entries.find(e => e.id === codexSelectedId) || entries[0];
+      codexSelectedId = current.id;
+      viewEl.innerHTML = `
+        <h4 style="margin-top:0; margin-bottom:8px;">${current.title}</h4>
+        <p style="font-size:12px; color:#d4c5b0; margin-top:0;">${current.category}</p>
+        <div>${current.text}</div>
+      `;
+    }
+
+    function selectCodexEntry(id) {
+      codexSelectedId = id;
+      renderCodexModal();
+    }
+
+    // =========================
+    // FUNÇÕES AUXILIARES
+    // =========================
+
     function randInt(min, max) {
       return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
     function getUniqueDialogue(category) {
+      // escolhe entre diálogos base e, se a Vigília já aconteceu, diálogos extras
       if (!DIALOGUES[category] || DIALOGUES[category].length === 0) return "";
       if (!gameState.seen_dialogues) gameState.seen_dialogues = {};
       if (!Array.isArray(gameState.seen_dialogues[category])) {
         gameState.seen_dialogues[category] = [];
       }
+
+      const basePool = DIALOGUES[category] || [];
+      const extraPool = (gameState && gameState.has_seen_vigilia && DIALOGUES_AFTER[category])
+        ? DIALOGUES_AFTER[category]
+        : [];
+
+      const pool = basePool.concat(extraPool);
+      if (pool.length === 0) return "";
+
       const seen = new Set(gameState.seen_dialogues[category]);
-      const pool = DIALOGUES[category];
       const unused = pool.filter(d => !seen.has(d.id));
+
       let chosen;
       if (unused.length > 0) {
         chosen = unused[randInt(0, unused.length - 1)];
@@ -688,6 +1030,10 @@
         gameState.seen_dialogues[category] = [];
       }
       gameState.seen_dialogues[category].push(chosen.id);
+
+      // Desbloqueia entrada no códex para esta fala
+      unlockCodexFromDialogue(category, chosen);
+
       return chosen.text;
     }
 
@@ -703,6 +1049,11 @@
       if (!gameState.extra_items[itemId]) gameState.extra_items[itemId] = 0;
       if (gameState.extra_items[itemId] >= 3) return;
       gameState.extra_items[itemId] += 1;
+
+      // Ao obter o item pela primeira vez, adiciona ao Códex
+      if (gameState.extra_items[itemId] === 1) {
+        unlockCodexFromItem(itemId);
+      }
     }
 
     function getHerbCharges() {
@@ -762,6 +1113,88 @@
       return finalChance;
     }
 
+    // =========================
+    //   VIGÍLIA DO QUARTO DIA
+    // =========================
+
+    function shouldTriggerVigilia() {
+      if (!gameState) return false;
+      if (gameState.has_seen_vigilia) return false;
+      const cured = !!gameState.plague_cured_once;
+      const manySaved = gameState.patients_saved >= 12;
+      const highRep = gameState.reputation >= 90;
+      return cured || manySaved || highRep;
+    }
+
+    function showVigiliaDoQuartoDia() {
+      if (!gameState) return;
+      gameState.has_seen_vigilia = true;
+      unlockVigiliaTestimonyEntry();
+      addDiaryEntry(
+        "vigilia_quarto_dia",
+        "A Vigília do Quarto Dia",
+        "Nesta noite, febril e exausto, fui visitado não por um padre, nem por um colega médico, mas pela própria Morte. Ela não tomou nada de mim. Apenas falou sobre vidas concedidas, não conquistadas, e sobre alguém que lucra quando todos adoecem. Desde então, não consigo olhar a peste como apenas doença."
+      );
+
+      const content = document.getElementById('mainContent');
+      content.innerHTML = `
+        <div class="scene-container transition-scene">
+          <div class="transition-icon">🜏</div>
+          <h2 class="scene-title">A Vigília do Quarto Dia</h2>
+          <p class="scene-text">
+            A noite cai pesada. Seu corpo arde em febre residual, o suor frio gruda na pele, 
+            e as velas ao redor da cama tremem como se algo respirasse junto com você.
+          </p>
+          <p class="scene-text">
+            O quarto parece encolher. O som distante dos sinos e tosses se apaga, 
+            até que reste apenas o crepitar das chamas. Então, você percebe:
+            <strong>não está mais sozinho</strong>.
+          </p>
+          <p class="scene-text">
+            À sombra da última vela, uma figura esguia, envolta em tecido escuro, 
+            observa você em silêncio. O rosto é indistinto, mas a presença é inconfundível.
+          </p>
+          <div class="news-banner" style="text-align:left;">
+            “Não comemore, doutor. A vida não foi conquistada.<br>
+            Ela foi… <strong>concedida</strong>.”
+            <br><br>
+            “Pergunte-se: <strong>quem lucra quando todos adoecem?</strong>”
+          </div>
+          <p class="scene-text">
+            Você tenta falar, mas a garganta falha. Quando finalmente consegue 
+            se erguer, a figura já não está ali. Apenas o cheiro de <em>treva e incenso</em> permanece.
+          </p>
+          <p class="scene-text">
+            Desde essa noite, a peste deixou de parecer apenas doença. 
+            Há mãos invisíveis apostando com vidas que você tenta salvar.
+          </p>
+          <div class="choices-container">
+            <button class="choice-button" onclick="showDayStart()">
+              <span class="choice-icon">☀️</span>
+              Acordar para o novo dia
+            </button>
+            <button class="choice-button" onclick="openCodex()">
+              <span class="choice-icon">📖</span>
+              Registrar esse testemunho no Códex
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function checkAndShowVigiliaOrNextDay() {
+      if (shouldTriggerVigilia()) {
+        showVigiliaDoQuartoDia();
+      } else {
+        // comportamento antigo: chance de sonho sutil ou amanhecer normal
+        if (Math.random() < 0.2) {
+          showSubtleCutsceneThenDayStart();
+        } else {
+          showDayStart();
+        }
+      }
+    }
+
     // Data SDK Handler
     const dataHandler = {
       onDataChanged(data) {
@@ -777,6 +1210,15 @@
           if (typeof gameState.has_plague !== 'boolean') gameState.has_plague = false;
           if (!gameState.extra_items) gameState.extra_items = {};
           if (!gameState.seen_dialogues) gameState.seen_dialogues = {};
+          if (!gameState.codex) gameState.codex = {};
+          if (typeof gameState.has_seen_vigilia !== 'boolean') gameState.has_seen_vigilia = false;
+          if (typeof gameState.plague_cured_once !== 'boolean') gameState.plague_cured_once = false;
+
+          // mostra barras e botão de códex se já tiver jogo
+          document.getElementById('statsBar').classList.remove('hidden');
+          document.getElementById('inventoryBar').classList.remove('hidden');
+          const cb = document.getElementById('codexButton');
+          if (cb) cb.classList.remove('hidden');
           
           if (!isLoading) {
             updateUI();
@@ -825,6 +1267,7 @@
     }
 
     async function startNewGame() {
+      iniciarMusica();
       if (isLoading) return;
       isLoading = true;
 
@@ -848,7 +1291,10 @@
         has_plague: false,
         extra_items: {},
         seen_dialogues: {},
+        codex: {},
         game_over: false,
+        has_seen_vigilia: false,
+        plague_cured_once: false,
         timestamp: new Date().toISOString()
       };
 
@@ -866,6 +1312,9 @@
 
         document.getElementById('statsBar').classList.remove('hidden');
         document.getElementById('inventoryBar').classList.remove('hidden');
+        const cb = document.getElementById('codexButton');
+        if (cb) cb.classList.remove('hidden');
+
         updateUI();
         showDayStart();
       } else {
@@ -1161,7 +1610,7 @@
             Hoje em dia, doutor, <strong>nem tudo se resolve com moedas</strong>...”
           </p>
           <p class="scene-text">
-            Sua reputação atual: <strong>${gameState.reputation}</strong><br>
+            Sua reputação atual: <strong>${rep}</strong><br>
             Isso influencia quantas porções raras chegam até você – ervas, incenso, poções...
           </p>
           <p class="scene-text">Suas moedas: <strong>${gameState.money} 💰</strong></p>
@@ -1961,11 +2410,7 @@
 
       if (result.isOk) {
         updateUI();
-        if (Math.random() < 0.2) {
-          showSubtleCutsceneThenDayStart();
-        } else {
-          showDayStart();
-        }
+        checkAndShowVigiliaOrNextDay();
       }
     }
 
@@ -1980,7 +2425,7 @@
 
       if (result.isOk) {
         updateUI();
-        showDayStart();
+        checkAndShowVigiliaOrNextDay();
       }
     }
 
@@ -2066,12 +2511,21 @@
         const success = Math.random() < 0.5;
         if (success) {
           gameState.has_plague = false;
+          gameState.plague_cured_once = true;
           const bonus = 50;
           const before = gameState.health;
           gameState.health = Math.min(100, gameState.health + bonus);
           const realGain = gameState.health - before;
           msg = `Você utiliza ${resourceName} em si mesmo, focando nos sintomas da peste. Contra todas as probabilidades, 
           a doença recua e sua vitalidade aumenta em aproximadamente <strong>${realGain}</strong> pontos.`;
+
+          // registra no diário
+          addDiaryEntry(
+            "cura_peste_dia_" + gameState.day + "_" + resource,
+            "Autotratamento bem-sucedido",
+            "Nesta noite, arrisquei usar " + resourceName + " contra a peste que corroía meu corpo. Contra todas as expectativas, os sintomas recuaram. Talvez eu tenha enganado os olhos de quem observa este tabuleiro de pragas."
+          );
+
         } else {
           msg = `Você usa ${resourceName}, mas a peste continua em seu corpo. Talvez precise de mais tempo, ou de outro tipo de ajuda.`;
         }
@@ -2138,7 +2592,7 @@
         <div class="scene-container">
           <h2 class="scene-title">🗺️ Escolher Região</h2>
           <p class="scene-text">
-            Você pode viajar para outra região. Regiões mais perigosas pagam melhor, 
+            Você pode viajar para outra região. Regiões mais perigosas payam melhor, 
             mas o risco de infecção é maior. Viajar cansa o corpo (perda de saúde) e consome algumas moedas.
           </p>
           <div class="choices-container">
@@ -2335,6 +2789,14 @@
         Em sonhos, você vê sombras observando cidades inteiras como se fossem peças em um tabuleiro.
         A sensação é de que alguém está contando quantos sobrevivem, não apenas quantos morrem.
       `;
+
+      // registra no diário também
+      addDiaryEntry(
+        "sonho_dia_" + gameState.day,
+        "Sonho inquieto na noite do dia " + gameState.day,
+        text
+      );
+
       const content = document.getElementById('mainContent');
       content.innerHTML = `
         <div class="scene-container transition-scene">
@@ -2393,6 +2855,14 @@
       isLoading = true;
 
       gameState.game_over = true;
+
+      // registra um último diário
+      addDiaryEntry(
+        "abandono_dia_" + gameState.day,
+        "Abandono da profissão",
+        "Hoje decidi deixar para trás a máscara, a lanceta e os corredores de praga. Fugi para o campo, mas os símbolos e sussurros continuam comigo. A sensação é de que mudei apenas de posição no tabuleiro, não de jogo."
+      );
+
       const result = await window.dataSdk.update(gameState);
       isLoading = false;
 
@@ -2516,6 +2986,9 @@
           <p>Quantidade: <strong>${qty}</strong></p>
           <p>Valor de venda: <strong>${def.sellValue} moedas</strong></p>
         `;
+        if (key === 'relic_medalhao' && gameState.has_seen_vigilia) {
+          desc += `<p><em>Agora, à luz daquela noite em que a Morte falou com você, a inscrição parece quase fazer sentido… mas ainda falta algo.</em></p>`;
+        }
         if (!owned) {
           desc += `<p style="color:#f39c12;">Você ainda não possui este item.</p>`;
         }
@@ -2679,5 +3152,7 @@
       initGame();
     });
   </script>
+  <audio id="bgm" src="audio/Castles _n_the_Air.mp3" preload="auto" loop></audio>
+
  </body>
 </html>
